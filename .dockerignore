@@ -1,0 +1,24 @@
+# Контекст для сборки образа: нужны только исходники, файлы сборки и фронтенд.
+.git
+.github
+.idea
+.vscode
+
+build/
+.gradle/
+out/
+bin/
+
+frontend/node_modules/
+frontend/dist/
+frontend/e2e/
+frontend/test-results/
+frontend/playwright-report/
+
+# Статика Spring Boot собирается внутри образа из frontend/dist.
+src/main/resources/static/
+
+docker-compose*.yml
+.gitignore
+.dockerignore
+Dockerfile
