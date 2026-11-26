@@ -13,6 +13,48 @@ concurrency:
 permissions: {}
 
 jobs:
+  image:
+    # Проверяем, что Dockerfile собирается, на каждом PR. Публикует тот же
+    # образ publish-image.yml, поэтому кеш слоёв общий (scope=image).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: project-devops-deploy:ci
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
+
+      - name: Smoke test image
+        run: |
+          docker run -d --name smoke -p 8080:8080 -p 9090:9090 project-devops-deploy:ci
+          trap 'docker logs smoke; docker rm -f smoke' EXIT
+
+          # Docker прогоняет HEALTHCHECK сразу при старте, до того как поднимется
+          # приложение, поэтому ждём статус healthy, а не просто готовность порта.
+          health=starting
+          for attempt in $(seq 1 60); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' smoke)"
+            [ "$health" = healthy ] && break
+            sleep 2
+          done
+          echo "health status: $health"
+          [ "$health" = healthy ]
+
+          curl -fsS 'http://127.0.0.1:8080/api/bulletins?perPage=1' >/dev/null
+          curl -fsS http://127.0.0.1:8080/ >/dev/null
+          curl -fsS http://127.0.0.1:9090/actuator/health/readiness >/dev/null
+
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15

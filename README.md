@@ -44,6 +44,7 @@ All other variables supported by Spring Boot can be overridden the same way; che
 - PostgreSQL only if you run the `prod` profile with an external database.
 - Make.
 - NodeJS 20+
+- Docker with Buildx only for building and publishing the container image; the JDK, Gradle and Node are not needed on the host for that.
 
 ## Running
 
@@ -133,6 +134,56 @@ See [Makefile](./Makefile)
     ```
 
 3. Restart the backend (`make run`) and open `http://localhost:8080/` — the React app will now be served directly by the Java application.
+
+### Build and run the Docker image locally
+
+The multi-stage Dockerfile builds both the React frontend and Spring Boot backend, and packages the frontend as static resources served by the app. Docker Desktop (or another Docker Engine with Buildx) is required.
+
+```bash
+docker build -t project-devops-deploy:local .
+docker run --rm --name bulletins -p 8080:8080 -p 9090:9090 project-devops-deploy:local
+```
+
+To build for another architecture (for example an `arm64` server from an `amd64` laptop), run:
+
+```bash
+docker buildx build --platform linux/arm64 -t project-devops-deploy:local --load .
+```
+
+The default `dev` profile uses H2, so no external database is needed. Check `http://localhost:8080/`, `http://localhost:8080/swagger-ui/index.html`, or `http://localhost:9090/actuator/health/readiness`. For production, configure `SPRING_PROFILES_ACTIVE=prod` and the `SPRING_DATASOURCE_*` / S3 variables listed above. The container runs as a non-root user and includes a readiness health check.
+
+### Publish to GitHub Container Registry (GHCR)
+
+The `Publish image` GitHub Actions workflow builds and publishes `ghcr.io/<owner>/<repository>` on pushes to `main`, version tags (`v1.2.3`), or manual dispatch. It authenticates with the built-in `GITHUB_TOKEN` (`packages: write`), so no personal access token secret is required. Images are published for `linux/amd64` and `linux/arm64`. The first published package is private by default — open the package settings on GitHub to change its visibility if you want anonymous pulls.
+
+Tags pushed by the workflow:
+
+- `latest`, `main` and `sha-<short-sha>` for every push to `main`;
+- `1.2.3` and `1.2` for a `v1.2.3` git tag.
+
+Pin deployments to `sha-<short-sha>` or a version tag instead of `latest`. The `CI` workflow builds the same Dockerfile on every pull request and smoke-tests the container, so a broken image fails before it reaches `main`.
+
+To log in locally, create a GitHub personal access token (classic) with `read:packages` to pull, or `write:packages` to push. If your organization uses SSO, authorize the token for it. Use the GitHub username as the username and pass the token through standard input:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+```
+
+Build and push manually (replace the owner and repository with lowercase values):
+
+```bash
+docker build -t ghcr.io/OWNER/REPOSITORY:latest .
+docker push ghcr.io/OWNER/REPOSITORY:latest
+```
+
+After a successful push, pull and run the image with:
+
+```bash
+docker pull ghcr.io/OWNER/REPOSITORY:latest
+docker run --rm -p 8080:8080 -p 9090:9090 ghcr.io/OWNER/REPOSITORY:latest
+```
+
+Log out when finished with `docker logout ghcr.io`. Do not put the token in command-line arguments, source control, or image layers; `--password-stdin` avoids exposing it in shell history and process listings.
 
 ### Running in Docker
 
